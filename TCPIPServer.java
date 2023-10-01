@@ -9,12 +9,14 @@ class SharedData {
     private Set<String> trackerSet;
     private int hitCounter;
     private LocalDate date;
+    private String hitCounterFilePath;
 
-    public SharedData() {
+    public SharedData(String hitCounterFilePath) {
         this.ipSet = new HashSet<>();
         this.trackerSet = new HashSet<>();
         this.hitCounter = 0;
         this.date = LocalDate.now();
+        this.hitCounterFilePath = hitCounterFilePath;
         // below method covers failover scenario
         loadData();
     }
@@ -58,7 +60,6 @@ class SharedData {
     private void loadData() {
         String fileName = date.toString() + ".ip";
         try {
-            // Load the contents of IP file to ipSet
             File file = new File(fileName);
             if (file.exists()) {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
@@ -70,59 +71,38 @@ class SharedData {
                 reader.close();
             }
 
-            // Load the hit counter from the hitCounter file
-            File hitCounterFile = new File(FileHandler.HIT_COUNTER_FILE);
+            File hitCounterFile = new File(hitCounterFilePath);
             if (hitCounterFile.exists()) {
-                BufferedReader reader = new BufferedReader(new FileReader(hitCounterFile));
-                String hitCounterRead = reader.readLine();
-                if (hitCounterRead != null) {
-                    hitCounter = Integer.parseInt(hitCounterRead);
-                }
-                reader.close();
-            }
-            
-            /* - shared this idea in video demonstration : not required if
-            // we are ok to loose some records from trackerSet during downtime
-            // although : those set of records are already considered in ipSet and hitCounter
-            // Load the contents of tracker set file to tracker set
-            fileName = date.toString() + "-tracker-set" + ".ip";
-            File trackerSetFile = new File(fileName);
-            if (trackerSetFile.exists()) {
-                BufferedReader reader = new BufferedReader(new FileReader(trackerSetFile));
+                FileReader fileReader = new FileReader(hitCounterFile);
+                StringBuilder hitCounterBuilder = new StringBuilder();
                 while (true) {
-                    String ip = reader.readLine();
-                    if (ip == null) break;
-                    trackerSet.add(ip.trim());
+                    int hitCounterRead = fileReader.read();
+                    if (hitCounterRead == -1) break;
+                    hitCounterBuilder.append((char) hitCounterRead);
                 }
-                reader.close();
+
+                this.hitCounter = Integer.parseInt(hitCounterBuilder.toString().trim());
+                fileReader.close();
             }
-            */
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception e) {}
     }
 }
 
 class FileHandler {
-    // it can be made configurable later
-    public static final String HIT_COUNTER_FILE = "hitCounter.txt";
-    public static final int DUMP_THRESHOLD = 5;
-
-    public synchronized static void updateFiles(String ipFileName, int hitCounter, Set<String> ipSet) {
+    public synchronized static void updateFiles(String ipFileName, int hitCounter, Set<String> ipSet, String hitCounterFile) {
         try {
-            // Update the IP file
             File file = new File(ipFileName);
             if (!file.exists()) file.createNewFile();
-            BufferedWriter fileWriter = new BufferedWriter(new FileWriter(file, true));
+            FileWriter fileWriter = new FileWriter(file, true);
             for (String ip : ipSet) {
                 fileWriter.write(ip + "\n");
             }
             fileWriter.close();
 
             // Update the hit counter file
-            file = new File(HIT_COUNTER_FILE);
+            file = new File(hitCounterFile);
             if (!file.exists()) file.createNewFile();
-            fileWriter = new BufferedWriter(new FileWriter(file, false));
+            fileWriter = new FileWriter(file, true);
             fileWriter.write(String.valueOf(hitCounter));
             fileWriter.close();
         } catch (Exception e) {
@@ -134,17 +114,21 @@ class FileHandler {
 class Server {
     private ServerSocket serverSocket;
     private int port;
+    private String hitCounterFilePath;
+    private int hitCounterFileThreshold;
     private static SharedData sharedData;
 
-    public Server(int port) {
+    public Server(int port, String hitCounterFilePath, int hitCounterFileThreshold) {
         this.port = port;
-        this.sharedData = new SharedData();
+        this.hitCounterFilePath = hitCounterFilePath;
+        this.hitCounterFileThreshold = hitCounterFileThreshold;
+        this.sharedData = new SharedData(this.hitCounterFilePath);
         startListening();
     }
 
     private void startListening() {
         try {
-            serverSocket = new ServerSocket(port);            
+            serverSocket = new ServerSocket(this.port);            
             while (true) {
                 Socket socket = serverSocket.accept();
                 Thread thread = new Thread(new RequestHandler(socket));
@@ -164,24 +148,25 @@ class Server {
 
         public void run() {
             try {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
+                InputStream inputStream = socket.getInputStream();
+                InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
+                BufferedReader reader = new BufferedReader(inputStreamReader);
                 String ipAddress = reader.readLine();
+
+                OutputStream outputStream = socket.getOutputStream();
+                PrintWriter writer = new PrintWriter(outputStream, true);
                 
                 boolean isDumpRequired = false;
                 String fileName = "";
                 Set<String> tempIpSet = null;
                 int currentHitCounter = 0;
 
-                // acquiring lock on sharedData object
                 synchronized(sharedData) {
                     Set<String> ipSet = sharedData.getIpSet();
                     Set<String> trackerSet = sharedData.getTrackerSet();
                     int hitCounter = sharedData.getHitCounter();
                     fileName = sharedData.getDate().toString() + ".ip";
 
-                    // compare the date : if the date is same - check the entry in ipSet
-                    // if ipSet doesn't contain - consider it and increase the hitCounter
                     LocalDate currentDate = LocalDate.now();
                     if (currentDate.toString().equalsIgnoreCase(sharedData.getDate().toString())) {
                         if (!ipSet.contains(ipAddress)) {
@@ -190,15 +175,12 @@ class Server {
                             hitCounter++;
                         }
                         
-                        // if tracker set exhausts
-                        if (trackerSet.size() == FileHandler.DUMP_THRESHOLD) {
-                            // dump the data of tracker set in the file
+                        if (trackerSet.size() == hitCounterFileThreshold) {
                             isDumpRequired = true;
                             tempIpSet = new HashSet<>(trackerSet);
                             trackerSet.clear();
                         }
                     } else {
-                        // if control comes here, it means - the date is changed
                         isDumpRequired = true;
                         tempIpSet = new HashSet<>(trackerSet);
                         trackerSet.clear();
@@ -209,8 +191,6 @@ class Server {
                         ipSet.add(ipAddress);
                         sharedData.setDate(currentDate);
                         hitCounter++;
-                        // fileName's extension is also configurable
-                        // for simplicity - hardcoding it to ".ip"
                         fileName = currentDate.toString() + ".ip";
                     }
                     sharedData.setHitCounter(hitCounter);
@@ -218,10 +198,9 @@ class Server {
                 }
                 writer.println(currentHitCounter);
                 socket.close();
-                
-                // file handling operations starts here
+            
                 if (isDumpRequired) {
-                    FileHandler.updateFiles(fileName, currentHitCounter, tempIpSet);
+                    FileHandler.updateFiles(fileName, currentHitCounter, tempIpSet, hitCounterFilePath);
                     tempIpSet.clear();
                 }
             } catch (Exception e) {
@@ -247,6 +226,6 @@ public class TCPIPServer {
 
     public static void main(String[] args) {
         ServerConfigurations serverConfigurations = getServerConfigurations();
-        Server server = new Server(serverConfigurations.getPort());
+        Server server = new Server(serverConfigurations.getPort(), serverConfigurations.getHitCounterFilePath(), serverConfigurations.getHitCounterFileThreshold());
     }
 }
