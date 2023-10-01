@@ -27,26 +27,21 @@
      Welcome to Tomcat
   </description>
 
-
-  <servlet>
-    <servlet-name>WelcomeServlet</servlet-name>
-    <servlet-class>WelcomeServlet</servlet-class>
-  </servlet>
-  <servlet-mapping>
-    <servlet-name>WelcomeServlet</servlet-name>
-    <url-pattern>/WelcomeServlet</url-pattern>
-  </servlet-mapping>
-
   <servlet>
     <servlet-name>HitCounterService</servlet-name>
     <servlet-class>HitCounterService</servlet-class>
+    <init-param>
+        <param-name>server-host</param-name>
+        <param-value>192.168.122.108</param-value>
+    </init-param>
+    <init-param>
+        <param-name>server-port</param-name>
+        <param-value>1065</param-value>
+    </init-param>
   </servlet>
   <servlet-mapping>
     <servlet-name>HitCounterService</servlet-name>
     <url-pattern>/api/getHitCounter</url-pattern>
   </servlet-mapping>
 
-  <!--CUSTOM CONFIGURATIONS FOR TCP-IP SERVER-->
-  <tcp-ip-server-host>192.168.122.108</tcp-ip-server-host>
-  <tcp-ip-server-port>1065</tcp-ip-server-port>
 </web-app>

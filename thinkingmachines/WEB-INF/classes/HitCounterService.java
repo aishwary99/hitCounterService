@@ -5,6 +5,16 @@ import java.io.*;
 import java.net.*;
 
 public class HitCounterService extends HttpServlet {
+    private String serverHost;
+    private int serverPort;
+
+    public void init(ServletConfig servletConfig) throws ServletException {
+        super.init(servletConfig);
+        // get the init-param values from web.xml
+        this.serverHost = servletConfig.getInitParameter("server-host");
+        this.serverPort = Integer.parseInt(servletConfig.getInitParameter("server-port"));
+    }
+
   public void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
     // set response headers
     response.setContentType("text/html");
@@ -20,53 +30,27 @@ public class HitCounterService extends HttpServlet {
         String[] ips = xForwardedForHeader.split(",");
         String clientIpAddress = ips[0].trim();
         try {
-            // IP Address and Port number is configurable
-            String serverHost = getConfigValue("tcp-ip-server-host");
-            int port = Integer.parseInt(getConfigValue("tcp-ip-server-port"));
-
             // TCP-IP Client code starts here
-            Socket socket = new Socket(serverHost, port);
-            PrintWriter printWriter = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            Socket socket = new Socket(this.serverHost, this.serverPort);
+            OutputStream outputStream = socket.getOutputStream();
+            PrintWriter printWriter = new PrintWriter(outputStream, true);
+            printWriter.println(clientIpAddress);
 
-            String tcpIpRequest = clientIpAddress;
-            printWriter.println(tcpIpRequest);
-            
+
+            InputStream inputStream = socket.getInputStream();
+            InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
             StringBuilder responseBuilder = new StringBuilder();
-            String responseLine;
-            while ((responseLine = bufferedReader.readLine()) != null) {
-                responseBuilder.append(responseLine).append("\n");
+            int bytesRead;
+            while (true) {
+                bytesRead = inputStreamReader.read();
+                if (bytesRead == -1) break;
+                responseBuilder.append((char) bytesRead);
             }
+            
             socket.close();
             writer.println(responseBuilder.toString());
             // TCP-IP Client code ends here
         } catch (Exception e) {}
       }
-    }
-
-    /*
-    * Utility method to parse the configKey from web.xml file contents
-    * and return its value as String
-    */
-    private String getConfigValue(String configKey) {
-        String configKeyOpeningTag = "<" + configKey + ">";
-        String configKeyClosingTag = "</" + configKey + ">";
-        String webXMLPath = "/WEB-INF/web.xml";
-        try {
-            ServletContext servletContext = getServletContext();
-            InputStream webXmlStream = servletContext.getResourceAsStream(webXMLPath);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(webXmlStream));
-            String line;
-            while (true) {
-                line = reader.readLine();
-                if (line == null) break;
-                if (line.contains(configKeyOpeningTag)) {
-                    int startIndex = line.indexOf(configKeyOpeningTag) + configKeyOpeningTag.length();
-                    int endIndex = line.indexOf(configKeyClosingTag);
-                    return line.substring(startIndex, endIndex);
-                }
-            }
-        } catch (Exception e) {}
-        return "";
     }
 }
