@@ -22,14 +22,14 @@
   version="4.0"
   metadata-complete="true">
 
-  <display-name>Welcome to Tomcat</display-name>
+  <display-name>Hit Counter Service</display-name>
   <description>
-     Welcome to Tomcat
+     Welcome to Hit Counter Service application
   </description>
 
   <servlet>
-    <servlet-name>HitCounterService</servlet-name>
-    <servlet-class>HitCounterService</servlet-class>
+    <servlet-name>com.thinking.machines.HitCounterService</servlet-name>
+    <servlet-class>com.thinking.machines.HitCounterService</servlet-class>
     <init-param>
         <param-name>server-host</param-name>
         <param-value>192.168.122.108</param-value>
@@ -40,7 +40,7 @@
     </init-param>
   </servlet>
   <servlet-mapping>
-    <servlet-name>HitCounterService</servlet-name>
+    <servlet-name>com.thinking.machines.HitCounterService</servlet-name>
     <url-pattern>/api/getHitCounter</url-pattern>
   </servlet-mapping>
 
