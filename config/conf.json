@@ -1,0 +1,5 @@
+{
+    "port" : 1065,
+    "hitCounterFilePath" : "hitCounter.txt",
+    "hitCounterFileThreshold" : 5
+}
