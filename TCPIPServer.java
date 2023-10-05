@@ -5,18 +5,20 @@ import java.time.*;
 import com.google.gson.*;
 
 class SharedData {
+    private Map<String, Set<String>> privateKeyToIpSetMap;
     private Set<String> ipSet;
     private Set<String> trackerSet;
     private int hitCounter;
     private LocalDate date;
     private String hitCounterFilePath;
 
-    public SharedData(String hitCounterFilePath) {
+    public SharedData(String hitCounterFilePath, Map<String, Set<String>> privateKeyToIpSetMap) {        
         this.ipSet = new HashSet<>();
         this.trackerSet = new HashSet<>();
         this.hitCounter = 0;
         this.date = LocalDate.now();
         this.hitCounterFilePath = hitCounterFilePath;
+        this.privateKeyToIpSetMap = privateKeyToIpSetMap;
         // below method covers failover scenario
         loadData();
     }
@@ -118,11 +120,11 @@ class Server {
     private int hitCounterFileThreshold;
     private static SharedData sharedData;
 
-    public Server(int port, String hitCounterFilePath, int hitCounterFileThreshold) {
+    public Server(int port, String hitCounterFilePath, int hitCounterFileThresholdm, Map<String, Set<String>> privateKeyToIpSetMap) {
         this.port = port;
         this.hitCounterFilePath = hitCounterFilePath;
         this.hitCounterFileThreshold = hitCounterFileThreshold;
-        this.sharedData = new SharedData(this.hitCounterFilePath);
+        this.sharedData = new SharedData(this.hitCounterFilePath, privateKeyToIpSetMap);
         startListening();
     }
 
@@ -211,6 +213,28 @@ class Server {
 }
 
 public class TCPIPServer {
+    private static Map<String, Set<String>> getPrivateKeys() {
+        String privateKeyFilePath = "private-keys/privateKeys.json";
+        PrivateKey privateKeyObject =null;
+
+        try {
+            FileReader reader = new FileReader(privateKeyFilePath);
+            Gson gson = new Gson();
+            privateKeyObject = gson.fromJson(reader, PrivateKey.class);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        Map<String, Set<String>> privateKeyToIpSetMap = new HashMap<>();
+        if (privateKeyObject != null) {
+            for (String privateKey : privateKeyObject.getKeys()) {
+                privateKeyToIpSetMap.put(privateKey, new HashSet<String>());
+            }
+        }
+
+        return privateKeyToIpSetMap;
+    }
+
     private static ServerConfigurations getServerConfigurations() {
         String configFilePath = "config/conf.json";
         ServerConfigurations serverConfigurations = null;
@@ -226,6 +250,7 @@ public class TCPIPServer {
 
     public static void main(String[] args) {
         ServerConfigurations serverConfigurations = getServerConfigurations();
-        Server server = new Server(serverConfigurations.getPort(), serverConfigurations.getHitCounterFilePath(), serverConfigurations.getHitCounterFileThreshold());
+        Map<String, Set<String>> privateKeyToIpSetMap = getPrivateKeys();
+        Server server = new Server(serverConfigurations.getPort(), serverConfigurations.getHitCounterFilePath(), serverConfigurations.getHitCounterFileThreshold(), privateKeyToIpSetMap);
     }
 }
