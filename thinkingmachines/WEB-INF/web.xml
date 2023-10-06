@@ -38,6 +38,10 @@
         <param-name>server-port</param-name>
         <param-value>1065</param-value>
     </init-param>
+    <init-param>
+        <param-name>private-key</param-name>
+        <param-value>A86878563DC662894BF4C6C2574DE</param-value>
+    </init-param>
   </servlet>
   <servlet-mapping>
     <servlet-name>com.thinking.machines.HitCounterService</servlet-name>
