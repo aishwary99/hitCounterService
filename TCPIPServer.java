@@ -10,13 +10,14 @@ class SharedData {
     private Map<String, Integer> privateKeyToHitCounterMap;
     private Map<String, Set<String>> privateKeyToTrackerSetMap;
     private LocalDate date;
-    private String hitCounterFilePath;
+    private String hitCounterFile;
 
-    public SharedData(String hitCounterFilePath, Map<String, Set<String>> privateKeyToWhitelistedIpsMap) {
+    public SharedData(String hitCounterFile, Map<String, Set<String>> privateKeyToWhitelistedIpsMap) {
         this.date = LocalDate.now();
-        this.hitCounterFilePath = hitCounterFilePath;
+        this.hitCounterFile = hitCounterFile;
         this.privateKeyToWhitelistedIpsMap = privateKeyToWhitelistedIpsMap;
         initializeMaps();
+        loadData();
     }
 
     public void setIpSet(String privateKey, Set<String> ipSet) {
@@ -70,36 +71,43 @@ class SharedData {
     /**
      * Loads the persisted data of ip's and hitCounter in sharedData
      * Scenario - B.E Server Failover / Restarts
+     * */
     private void loadData() {
-        String fileName = date.toString() + ".ip";
-        try {
-            File file = new File(fileName);
-            if (file.exists()) {
-                BufferedReader reader = new BufferedReader(new FileReader(file));
-                while (true) {
-                    String ip = reader.readLine();
-                    if (ip == null) break;
-                    ipSet.add(ip.trim());
-                }
-                reader.close();
-            }
+        String directory = LocalDate.now().toString();
 
-            File hitCounterFile = new File(hitCounterFilePath);
-            if (hitCounterFile.exists()) {
-                FileReader fileReader = new FileReader(hitCounterFile);
-                StringBuilder hitCounterBuilder = new StringBuilder();
-                while (true) {
-                    int hitCounterRead = fileReader.read();
-                    if (hitCounterRead == -1) break;
-                    hitCounterBuilder.append((char) hitCounterRead);
+        for (Map.Entry<String, Set<String>> entry : this.privateKeyToWhitelistedIpsMap.entrySet()) {
+            String privateKey = entry.getKey();
+            String ipFileName = directory + "/" + privateKey + ".ip";
+            String hitCounterFileName = directory + "/" + privateKey + "." + hitCounterFile;
+
+            try {
+                File file = new File(ipFileName);
+                if (file.exists()) {
+                    BufferedReader reader = new BufferedReader(new FileReader(file));
+                    while (true) {
+                        String ip = reader.readLine();
+                        if (ip == null) break;
+                        this.privateKeyToIpsMap.get(privateKey).add(ip);
+                    }
+                    reader.close();
                 }
 
-                this.hitCounter = Integer.parseInt(hitCounterBuilder.toString().trim());
-                fileReader.close();
-            }
-        } catch (Exception e) {}
+                file = new File(hitCounterFileName);
+                if (file.exists()) {
+                    FileReader fileReader = new FileReader(file);
+                    StringBuilder hitCounterBuilder = new StringBuilder();
+                    while (true) {
+                        int hitCounterRead = fileReader.read();
+                        if (hitCounterRead == -1) break;
+                        hitCounterBuilder.append((char) hitCounterRead);
+                    }
+
+                    this.privateKeyToHitCounterMap.put(privateKey, Integer.parseInt(hitCounterBuilder.toString().trim()));
+                    fileReader.close();
+                }
+            } catch (Exception e) {}
+        }
     }
-    */
 }
 
 class FileHandler {
@@ -117,7 +125,6 @@ class FileHandler {
             }
             fileWriter.close();
 
-            // Update the hit counter file
             file = new File(directoryPath + "/" + hitCounterFile);
             if (!file.exists()) file.createNewFile();
             fileWriter = new FileWriter(file, true);
@@ -184,9 +191,7 @@ class Server {
                     socket.close();
                     return;
                 }
-
-                System.out.println(" >>> Request ::: " + request);
-                                
+                         
                 boolean isDumpRequired = false;
                 String fileName = "";
                 String directoryPath = "";
