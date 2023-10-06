@@ -9,12 +9,14 @@ import java.net.*;
 public class HitCounterService extends HttpServlet {
     private String serverHost;
     private int serverPort;
+    private String privateKey;
 
     public void init(ServletConfig servletConfig) throws ServletException {
         super.init(servletConfig);
         // get the init-param values from web.xml
         this.serverHost = servletConfig.getInitParameter("server-host");
         this.serverPort = Integer.parseInt(servletConfig.getInitParameter("server-port"));
+        this.privateKey = servletConfig.getInitParameter("private-key");
     }
 
   public void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
@@ -36,7 +38,7 @@ public class HitCounterService extends HttpServlet {
             Socket socket = new Socket(this.serverHost, this.serverPort);
             OutputStream outputStream = socket.getOutputStream();
             PrintWriter printWriter = new PrintWriter(outputStream, true);
-            printWriter.println(clientIpAddress);
+            printWriter.println(this.privateKey + " , " + clientIpAddress);
 
 
             InputStream inputStream = socket.getInputStream();
