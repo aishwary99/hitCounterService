@@ -5,46 +5,42 @@ import java.time.*;
 import com.google.gson.*;
 
 class SharedData {
-    private Map<String, Set<String>> privateKeyToIpSetMap;
-    private Set<String> ipSet;
-    private Set<String> trackerSet;
-    private int hitCounter;
+    private Map<String, Set<String>> privateKeyToWhitelistedIpsMap;
+    private Map<String, Set<String>> privateKeyToIpsMap;
+    private Map<String, Integer> privateKeyToHitCounterMap;
+    private Map<String, Set<String>> privateKeyToTrackerSetMap;
     private LocalDate date;
     private String hitCounterFilePath;
 
-    public SharedData(String hitCounterFilePath, Map<String, Set<String>> privateKeyToIpSetMap) {        
-        this.ipSet = new HashSet<>();
-        this.trackerSet = new HashSet<>();
-        this.hitCounter = 0;
+    public SharedData(String hitCounterFilePath, Map<String, Set<String>> privateKeyToWhitelistedIpsMap) {
         this.date = LocalDate.now();
         this.hitCounterFilePath = hitCounterFilePath;
-        this.privateKeyToIpSetMap = privateKeyToIpSetMap;
-        // below method covers failover scenario
-        loadData();
+        this.privateKeyToWhitelistedIpsMap = privateKeyToWhitelistedIpsMap;
+        initializeMaps();
     }
 
-    public void setIpSet(Set<String> ipSet) {
-        this.ipSet = ipSet;
+    public void setIpSet(String privateKey, Set<String> ipSet) {
+        this.privateKeyToIpsMap.put(privateKey, ipSet);
     }
 
-    public Set<String> getIpSet() {
-        return this.ipSet;
+    public Set<String> getIpSet(String privateKey) {
+        return this.privateKeyToIpsMap.get(privateKey);
     }
 
-    public void setTrackerSet(Set<String> trackerSet) {
-        this.trackerSet = trackerSet;
+    public void setTrackerSet(String privateKey, Set<String> trackerSet) {
+        this.privateKeyToTrackerSetMap.put(privateKey, trackerSet);
     }
 
-    public Set<String> getTrackerSet() {
-        return this.trackerSet;
+    public Set<String> getTrackerSet(String privateKey) {
+        return this.privateKeyToTrackerSetMap.get(privateKey);
     }
 
-    public void setHitCounter(int hitCounter) {
-        this.hitCounter = hitCounter;
+    public void setHitCounter(String privateKey, int hitCounter) {
+        this.privateKeyToHitCounterMap.put(privateKey, hitCounter);
     }
 
-    public int getHitCounter() {
-        return this.hitCounter;
+    public int getHitCounter(String privateKey) {
+        return this.privateKeyToHitCounterMap.get(privateKey);
     }
 
     public void setDate(LocalDate date) {
@@ -55,10 +51,25 @@ class SharedData {
         return this.date;
     }
 
+    public boolean isIpWhitelisted(String privateKey, String ipAddress) {
+        return this.privateKeyToWhitelistedIpsMap.get(privateKey).contains(ipAddress);
+    }
+
+    private void initializeMaps() {
+        this.privateKeyToIpsMap = new HashMap<>(this.privateKeyToWhitelistedIpsMap.size());
+        this.privateKeyToHitCounterMap = new HashMap<>(this.privateKeyToWhitelistedIpsMap.size());
+        this.privateKeyToTrackerSetMap = new HashMap<>(this.privateKeyToWhitelistedIpsMap.size());
+
+        for (String privateKey : this.privateKeyToWhitelistedIpsMap.keySet()) {
+            this.privateKeyToIpsMap.put(privateKey, new HashSet<String>());
+            this.privateKeyToHitCounterMap.put(privateKey, 0);
+            this.privateKeyToTrackerSetMap.put(privateKey, new HashSet<String>());
+        }
+    }
+
     /**
      * Loads the persisted data of ip's and hitCounter in sharedData
      * Scenario - B.E Server Failover / Restarts
-     */
     private void loadData() {
         String fileName = date.toString() + ".ip";
         try {
@@ -88,11 +99,16 @@ class SharedData {
             }
         } catch (Exception e) {}
     }
+    */
 }
 
 class FileHandler {
-    public synchronized static void updateFiles(String ipFileName, int hitCounter, Set<String> ipSet, String hitCounterFile) {
+    public synchronized static void updateFiles(String ipFileName, String directoryPath ,int hitCounter, Set<String> ipSet, String hitCounterFile) {
         try {
+            File directory = new File(directoryPath);
+            if (!directory.exists()) directory.mkdir();
+
+            ipFileName = directoryPath + "/" + ipFileName;
             File file = new File(ipFileName);
             if (!file.exists()) file.createNewFile();
             FileWriter fileWriter = new FileWriter(file, true);
@@ -102,7 +118,7 @@ class FileHandler {
             fileWriter.close();
 
             // Update the hit counter file
-            file = new File(hitCounterFile);
+            file = new File(directoryPath + "/" + hitCounterFile);
             if (!file.exists()) file.createNewFile();
             fileWriter = new FileWriter(file, true);
             fileWriter.write(String.valueOf(hitCounter));
@@ -116,15 +132,15 @@ class FileHandler {
 class Server {
     private ServerSocket serverSocket;
     private int port;
-    private String hitCounterFilePath;
+    private String hitCounterFile;
     private int hitCounterFileThreshold;
     private static SharedData sharedData;
 
-    public Server(int port, String hitCounterFilePath, int hitCounterFileThresholdm, Map<String, Set<String>> privateKeyToIpSetMap) {
+    public Server(int port, String hitCounterFile, int hitCounterFileThreshold, Map<String, Set<String>> privateKeyToIpsMap) {
         this.port = port;
-        this.hitCounterFilePath = hitCounterFilePath;
+        this.hitCounterFile = hitCounterFile;
         this.hitCounterFileThreshold = hitCounterFileThreshold;
-        this.sharedData = new SharedData(this.hitCounterFilePath, privateKeyToIpSetMap);
+        this.sharedData = new SharedData(this.hitCounterFile, privateKeyToIpsMap);
         startListening();
     }
 
@@ -153,21 +169,45 @@ class Server {
                 InputStream inputStream = socket.getInputStream();
                 InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
                 BufferedReader reader = new BufferedReader(inputStreamReader);
-                String ipAddress = reader.readLine();
-
                 OutputStream outputStream = socket.getOutputStream();
                 PrintWriter writer = new PrintWriter(outputStream, true);
-                
+                String request = reader.readLine();
+
+                String ipAddress = "";
+                String privateKey = "";
+                if (request.indexOf(",") != -1) {
+                    String[] splittedRequest = request.split(",");
+                    privateKey = splittedRequest[0].trim();
+                    ipAddress = splittedRequest[1].trim();
+                } else {
+                    writer.println("");
+                    socket.close();
+                    return;
+                }
+
+                System.out.println(" >>> Request ::: " + request);
+                                
                 boolean isDumpRequired = false;
                 String fileName = "";
+                String directoryPath = "";
+                String hitCounterFilePath = "";
                 Set<String> tempIpSet = null;
                 int currentHitCounter = 0;
 
                 synchronized(sharedData) {
-                    Set<String> ipSet = sharedData.getIpSet();
-                    Set<String> trackerSet = sharedData.getTrackerSet();
-                    int hitCounter = sharedData.getHitCounter();
-                    fileName = sharedData.getDate().toString() + ".ip";
+                    int hitCounter = sharedData.getHitCounter(privateKey);
+                    if (!sharedData.isIpWhitelisted(privateKey, ipAddress)) {
+                        writer.println(hitCounter);
+                        socket.close();
+                        return;
+                    }
+
+                    Set<String> ipSet = sharedData.getIpSet(privateKey);
+                    Set<String> trackerSet = sharedData.getTrackerSet(privateKey);
+
+                    directoryPath = sharedData.getDate().toString();
+                    fileName = privateKey + ".ip";
+                    hitCounterFilePath = privateKey + "." + hitCounterFile;
 
                     LocalDate currentDate = LocalDate.now();
                     if (currentDate.toString().equalsIgnoreCase(sharedData.getDate().toString())) {
@@ -176,33 +216,36 @@ class Server {
                             trackerSet.add(ipAddress);
                             hitCounter++;
                         }
-                        
+
                         if (trackerSet.size() == hitCounterFileThreshold) {
                             isDumpRequired = true;
                             tempIpSet = new HashSet<>(trackerSet);
                             trackerSet.clear();
                         }
-                    } else {
+                    }else {
                         isDumpRequired = true;
                         tempIpSet = new HashSet<>(trackerSet);
                         trackerSet.clear();
 
-                        sharedData.setIpSet(new HashSet<String>());
-                        sharedData.setTrackerSet(new HashSet<String>());
-                        ipSet = sharedData.getIpSet();
+                        sharedData.setIpSet(privateKey, new HashSet<String>());
+                        sharedData.setTrackerSet(privateKey, new HashSet<String>());
+                        ipSet = sharedData.getIpSet(privateKey);
                         ipSet.add(ipAddress);
                         sharedData.setDate(currentDate);
                         hitCounter++;
-                        fileName = currentDate.toString() + ".ip";
+
+                        directoryPath = sharedData.getDate().toString();
+                        fileName = privateKey + ".ip";
+                        hitCounterFilePath = privateKey + "." + hitCounterFile;
                     }
-                    sharedData.setHitCounter(hitCounter);
+                    sharedData.setHitCounter(privateKey, hitCounter);
                     currentHitCounter = hitCounter;
                 }
                 writer.println(currentHitCounter);
                 socket.close();
-            
+
                 if (isDumpRequired) {
-                    FileHandler.updateFiles(fileName, currentHitCounter, tempIpSet, hitCounterFilePath);
+                    FileHandler.updateFiles(fileName, directoryPath, currentHitCounter, tempIpSet, hitCounterFilePath);
                     tempIpSet.clear();
                 }
             } catch (Exception e) {
@@ -214,25 +257,30 @@ class Server {
 
 public class TCPIPServer {
     private static Map<String, Set<String>> getPrivateKeys() {
-        String privateKeyFilePath = "private-keys/privateKeys.json";
-        PrivateKey privateKeyObject =null;
+        String privateKeysFilePath = "private-keys/privateKeys.json";
+        PrivateKeysData privateKeysData = null;
 
         try {
-            FileReader reader = new FileReader(privateKeyFilePath);
+            FileReader reader = new FileReader(privateKeysFilePath);
             Gson gson = new Gson();
-            privateKeyObject = gson.fromJson(reader, PrivateKey.class);
+            privateKeysData = gson.fromJson(reader, PrivateKeysData.class);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        Map<String, Set<String>> privateKeyToIpSetMap = new HashMap<>();
-        if (privateKeyObject != null) {
-            for (String privateKey : privateKeyObject.getKeys()) {
-                privateKeyToIpSetMap.put(privateKey, new HashSet<String>());
+        Map<String, Set<String>> privateKeyToIpsMap = new HashMap<>();
+        if (privateKeysData != null) {
+            for (PrivateKeyInfo privateKeyInfo : privateKeysData.getPrivateKeys()) {
+                String privateKey = privateKeyInfo.getPrivateKey().trim();
+                Set<String> listedIpsSet = new HashSet();
+                for (String listedIp : privateKeyInfo.getListedIps()) {
+                    listedIpsSet.add(listedIp.trim());
+                }
+                privateKeyToIpsMap.put(privateKey, listedIpsSet);
             }
         }
 
-        return privateKeyToIpSetMap;
+        return privateKeyToIpsMap;
     }
 
     private static ServerConfigurations getServerConfigurations() {
@@ -250,7 +298,7 @@ public class TCPIPServer {
 
     public static void main(String[] args) {
         ServerConfigurations serverConfigurations = getServerConfigurations();
-        Map<String, Set<String>> privateKeyToIpSetMap = getPrivateKeys();
-        Server server = new Server(serverConfigurations.getPort(), serverConfigurations.getHitCounterFilePath(), serverConfigurations.getHitCounterFileThreshold(), privateKeyToIpSetMap);
+        Map<String, Set<String>> privateKeyToIpsMap = getPrivateKeys();
+        Server server = new Server(serverConfigurations.getPort(), serverConfigurations.getHitCounterFilePath(), serverConfigurations.getHitCounterFileThreshold(), privateKeyToIpsMap);
     }
 }
